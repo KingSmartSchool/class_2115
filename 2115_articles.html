@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>背誦小助手</title>
+
+<style>
+  body{font-family:system-ui,-apple-system; margin:0; background:#f6f7f9;}
+  .wrap{max-width:920px; margin:0 auto; padding:16px;}
+  .card{background:#fff; border-radius:14px; padding:16px; margin:14px 0; box-shadow:0 2px 12px rgba(0,0,0,.06);}
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+  button, select{
+    padding:10px 14px; border-radius:10px; border:1px solid #ddd; background:#fff; font-size:14px;
+  }
+  button.primary{background:#111; color:#fff; border-color:#111;}
+  button:disabled{opacity:.45; cursor:not-allowed;}
+  textarea{
+    width:100%; height:120px; border-radius:12px; border:1px solid #ddd; padding:12px; box-sizing:border-box;
+  }
+  .target{font-size:16px; line-height:1.7; white-space:pre-wrap;}
+  .muted{color:#666; font-size:12px; line-height:1.5;}
+  .ok{background:#eaffea;padding:2px 4px;border-radius:6px;}
+  .miss{background:#ffecec;padding:2px 4px;border-radius:6px;}
+  .wrong{background:#e8f0ff;padding:2px 4px;border-radius:6px;}
+  .titleRow{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+</style>
+</head>
+
+<body>
+<div class="wrap">
+  <h2 class="titleRow">📚 背誦小助手 <span class="muted">（建議用 https + 手機 Chrome）</span></h2>
+
+  <!-- 功能選單 -->
+  <div class="card">
+    <b>功能選單</b>
+    <div class="row" style="margin-top:10px;">
+      <button id="tabView" class="primary">📖 文章展示</button>
+      <button id="tabRec">🎙️ 背誦練習</button>
+    </div>
+  </div>
+
+  <!-- ================= 文章展示頁 ================= -->
+  <div id="pageView">
+    <div class="card">
+      <b>選擇日期文章</b>
+      <div class="row" style="margin-top:10px;">
+        <select id="articleSelector"></select>
+        <button id="loadArticle" class="primary">載入</button>
+
+        <button id="ttsFull">🔊 朗讀全文</button>
+        <button id="ttsPause" disabled>⏸️ 暫停</button>
+        <button id="ttsResume" disabled>▶️ 繼續</button>
+        <button id="ttsStop" disabled>⏹️ 停止</button>
+
+        <span class="muted" id="supportText"></span>
+      </div>
+
+      <div style="margin-top:10px;font-weight:700;" id="articleTitle"></div>
+      <div class="muted" id="articleMeta"></div>
+
+      <div style="margin-top:10px;">
+        <div class="muted">文章內容：</div>
+        <div id="articleBody" class="target"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 背誦練習頁 ================= -->
+  <div id="pageRec" style="display:none;">
+
+    <!-- 背誦頁日期選單 -->
+    <div class="card">
+      <b>選擇日期文章（背誦用）</b>
+      <div class="row" style="margin-top:10px;">
+        <select id="articleSelectorRec"></select>
+        <button id="loadArticleRec" class="primary">載入</button>
+        <span class="muted" id="recMeta"></span>
+      </div>
+      <div class="muted" id="recTitleLine" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <b>背誦模式</b>
+      <div class="row" style="margin-top:10px;">
+        <select id="mode">
+          <option value="single">單句背誦</option>
+          <option value="triple">三句背誦</option>
+          <option value="full">整篇背誦</option>
+        </select>
+        <button id="prev">上一段</button>
+        <button id="next">下一段</button>
+        <button id="ttsTarget">🔊 朗讀本段</button>
+      </div>
+
+      <!-- ✅ 目標片段區塊：開始識別後會整塊隱藏 -->
+      <div id="targetArea" style="margin-top:12px;">
+        <div class="muted">目標片段：</div>
+        <div id="targetText" class="target"></div>
+        <div class="muted" id="progress"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <b>開始背誦</b>
+      <div class="muted">點開始後念英文；開始識別後課文會自動隱藏，避免偷看。（結束後按“檢查/停止/清空”會顯示回來對照）</div>
+
+      <div class="row" style="margin-top:10px;">
+        <button id="startRec" class="primary">🎙️ 開始識別</button>
+        <button id="stopRec">停止</button>
+        <button id="clear">清空</button>
+        <button id="check" class="primary">檢查</button>
+      </div>
+
+      <div style="margin-top:10px;">
+        <div class="muted">你的背誦內容：</div>
+        <textarea id="userText" placeholder="識別結果會出現在這里；或你也可以手動輸入再檢查。"></textarea>
+      </div>
+
+      <div style="margin-top:12px;">
+        <div class="muted">對比結果：</div>
+        <div id="diffOut"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* ========= 文章資料 ========= */
+const articles = {
+  "2026-01-22":{
+    title:"2026/01/22",
+    text:`At the beginning, a tadpole lived in a pond. 
+One day, a goose came and chased it. 
+The tadpole was scared and felt cold. 
+It left the water and hid under a stick. 
+Nearby, an insect moved slowly. 
+After a while, the goose went away. 
+The pond became peaceful again. 
+At the end, the tadpole swam back home and rested quietly.
+`
+  },
+  "2026-01-14":{
+    title:"2026/01/14",
+    text:`A group of travelers from Asia arrived in Africa and stopped near a quiet pond. 
+Under a tall coconut tree, I met a new friend and helped him feed the birds. 
+Later, we walked to a hot spring, where white smoke rose into the sky. 
+A small animal came out of a tree hole, and we laughed together. 
+As the sun went down, we chased after the last light of the day and felt peaceful and happy.
+`
+  }
+};
+
+/* ========= DOM ========= */
+const pageView = document.getElementById("pageView");
+const pageRec  = document.getElementById("pageRec");
+const tabView  = document.getElementById("tabView");
+const tabRec   = document.getElementById("tabRec");
+
+const selector = document.getElementById("articleSelector");
+const selectorRec = document.getElementById("articleSelectorRec");
+const loadArticleBtn = document.getElementById("loadArticle");
+const loadArticleRecBtn = document.getElementById("loadArticleRec");
+
+const modeEl = document.getElementById("mode");
+const targetAreaEl = document.getElementById("targetArea");
+const targetTextEl = document.getElementById("targetText");
+const progressEl = document.getElementById("progress");
+const userTextEl = document.getElementById("userText");
+const diffOutEl = document.getElementById("diffOut");
+const recMetaEl = document.getElementById("recMeta");
+const recTitleLineEl = document.getElementById("recTitleLine");
+
+/* ========= 功能切換 ========= */
+tabView.onclick = () => {
+  pageView.style.display = "";
+  pageRec.style.display = "none";
+  tabView.classList.add("primary");
+  tabRec.classList.remove("primary");
+};
+
+tabRec.onclick = () => {
+  pageView.style.display = "none";
+  pageRec.style.display = "";
+  tabRec.classList.add("primary");
+  tabView.classList.remove("primary");
+  syncAndLoad("view", true);
+};
+
+/* ========= 初始化選單 ========= */
+function buildSelectors(){
+  selector.innerHTML = "";
+  selectorRec.innerHTML = "";
+  Object.keys(articles).sort().forEach(k=>{
+    const o1 = document.createElement("option");
+    o1.value=k; o1.textContent=articles[k].title;
+    selector.appendChild(o1);
+
+    const o2 = document.createElement("option");
+    o2.value=k; o2.textContent=articles[k].title;
+    selectorRec.appendChild(o2);
+  });
+}
+buildSelectors();
+
+/* ========= 分段 ========= */
+let lines = [];
+let segments = [];
+let idx = 0;
+
+function splitLines(t){
+  return t.replace(/\r\n/g,"\n").split("\n").map(s=>s.trim()).filter(Boolean);
+}
+
+function buildSegments(mode){
+  if(mode==="full"){
+    segments = [lines.join(" ")];
+    idx = 0;
+    return;
+  }
+  const size = (mode==="single") ? 1 : 3;
+  segments = [];
+  for(let i=0;i<lines.length;i+=size){
+    segments.push(lines.slice(i,i+size).join(" "));
+  }
+  idx = 0;
+}
+
+function renderTarget(){
+  targetTextEl.textContent = segments[idx] || "";
+  progressEl.textContent = `進度 ${idx+1}/${segments.length}`;
+}
+
+/* ========= 顯示/隱藏目標片段 ========= */
+function showTargetArea(){
+  targetAreaEl.style.display = "";
+}
+function hideTargetArea(){
+  targetAreaEl.style.display = "none";
+}
+
+/* ========= 清空背誦輸入 ========= */
+let recognition = null;
+let finalTranscript = "";
+let lastFinalChunk = "";
+let recognizing = false;
+
+function resetRecInput(){
+  userTextEl.value = "";
+  diffOutEl.innerHTML = "";
+  finalTranscript = "";
+  lastFinalChunk = "";
+}
+
+/* ========= 載入文章（核心） ========= */
+function loadCurrentArticle(){
+  const key = selector.value;
+  const a = articles[key];
+
+  // 展示頁
+  document.getElementById("articleTitle").textContent = a.title;
+  lines = splitLines(a.text);
+  document.getElementById("articleMeta").textContent = `共 ${lines.length} 句`;
+  document.getElementById("articleBody").textContent = a.text;
+
+  // 背誦頁標題/句數
+  recMetaEl.textContent = `共 ${lines.length} 句`;
+  recTitleLineEl.textContent = `當前：${a.title}`;
+
+  // 重建分段並渲染
+  buildSegments(modeEl.value);
+  renderTarget();
+
+  // ✅ 每次載入文章：讓課文可見（方便準備）
+  showTargetArea();
+}
+
+loadArticleBtn.onclick = () => {
+  loadCurrentArticle();
+  showTargetArea();
+};
+
+loadArticleRecBtn.onclick = () => {
+  selector.value = selectorRec.value;
+  loadCurrentArticle();
+  resetRecInput();
+  showTargetArea();
+};
+
+/* ========= 雙向同步 + 自動載入 ========= */
+function syncAndLoad(from, reset=false){
+  if(from==="view") selectorRec.value = selector.value;
+  else selector.value = selectorRec.value;
+
+  loadCurrentArticle();
+
+  if(reset){
+    resetRecInput();
+    showTargetArea();
+  }
+}
+
+selector.addEventListener("change", () => syncAndLoad("view", true));
+selectorRec.addEventListener("change", () => syncAndLoad("rec", true));
+
+/* ========= 切換模式：回到第1段+清空+顯示課文 ========= */
+modeEl.addEventListener("change", () => {
+  buildSegments(modeEl.value);
+  idx = 0;
+  renderTarget();
+  resetRecInput();
+  showTargetArea();
+});
+
+/* ========= 上一段/下一段：切段時顯示課文（準備） ========= */
+document.getElementById("prev").onclick = () => {
+  if(idx>0){
+    idx--;
+    renderTarget();
+    resetRecInput();
+    showTargetArea();
+  }
+};
+document.getElementById("next").onclick = () => {
+  if(idx<segments.length-1){
+    idx++;
+    renderTarget();
+    resetRecInput();
+    showTargetArea();
+  }
+};
+
+/* ========= ✅ 朗讀（含暫停/繼續/停止） ========= */
+let currentUtterance = null;
+
+const btnTtsFull = document.getElementById("ttsFull");
+const btnTtsPause = document.getElementById("ttsPause");
+const btnTtsResume = document.getElementById("ttsResume");
+const btnTtsStop = document.getElementById("ttsStop");
+
+function setTtsButtons(state){
+  if(state === "idle"){
+    btnTtsPause.disabled = true;
+    btnTtsResume.disabled = true;
+    btnTtsStop.disabled = true;
+  }else if(state === "playing"){
+    btnTtsPause.disabled = false;
+    btnTtsResume.disabled = true;
+    btnTtsStop.disabled = false;
+  }else if(state === "paused"){
+    btnTtsPause.disabled = true;
+    btnTtsResume.disabled = false;
+    btnTtsStop.disabled = false;
+  }
+}
+setTtsButtons("idle");
+
+function speak(text){
+  if(!("speechSynthesis" in window)){
+    alert("此瀏覽器不支持朗讀。");
+    return;
+  }
+  window.speechSynthesis.cancel();
+
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US";
+  currentUtterance = u;
+
+  u.onstart = () => setTtsButtons("playing");
+  u.onend = () => setTtsButtons("idle");
+  u.onerror = () => setTtsButtons("idle");
+
+  window.speechSynthesis.speak(u);
+  setTimeout(()=>setTtsButtons("playing"), 150);
+}
+
+btnTtsFull.onclick = () => {
+  const full = articles[selector.value].text.replace(/\n/g," ");
+  speak(full);
+};
+
+btnTtsPause.onclick = () => {
+  try{
+    window.speechSynthesis.pause();
+    setTtsButtons("paused");
+  }catch(e){}
+};
+
+btnTtsResume.onclick = () => {
+  try{
+    window.speechSynthesis.resume();
+    setTtsButtons("playing");
+  }catch(e){}
+};
+
+btnTtsStop.onclick = () => {
+  try{ window.speechSynthesis.cancel(); }catch(e){}
+  setTtsButtons("idle");
+};
+
+document.getElementById("ttsTarget").onclick = () => {
+  const t = (segments[idx] || "").trim();
+  if(!t) return;
+  speak(t);
+};
+
+/* ========= ✅ 語音識別（防重覆爆字） ========= */
+document.getElementById("startRec").onclick = () => {
+  // ✅ 核心需求：按下開始識別那一刻，課文立刻消失
+  hideTargetArea();
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){
+    alert("此瀏覽器不支持語音識別。建議 Android Chrome + https。");
+    // 不支援也給他看回來
+    showTargetArea();
+    return;
+  }
+
+  recognition = new SR();
+  recognition.lang = "en-US";
+  recognition.interimResults = true;
+  recognition.continuous = true;
+
+  recognition.onstart = ()=> recognizing = true;
+  recognition.onend = ()=> recognizing = false;
+
+  recognition.onerror = (e)=>{
+    recognizing = false;
+    alert("語音識別出錯/被阻止：" + (e.error || "unknown") + "\n\n請檢查：地址欄🔒→ 麥克風 = 允許");
+    // 出錯就顯示回來
+    showTargetArea();
+  };
+
+  recognition.onresult = (e) => {
+    let finalText = "";
+    let interim = "";
+
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const t = e.results[i][0].transcript;
+      if(e.results[i].isFinal) finalText += t + " ";
+      else interim += t;
+    }
+
+    const clean = finalText.replace(/\s+/g," ").trim();
+
+    if(clean && clean !== lastFinalChunk){
+      finalTranscript = (finalTranscript + " " + clean).replace(/\s+/g," ").trim();
+      lastFinalChunk = clean;
+    }
+
+    userTextEl.value = (finalTranscript + (interim ? " " + interim : "")).trim();
+
+    const MAX_CHARS = 1200;
+    if(userTextEl.value.length > MAX_CHARS){
+      userTextEl.value = userTextEl.value.slice(-MAX_CHARS);
+      finalTranscript = userTextEl.value;
+    }
+  };
+
+  try{
+    recognition.start();
+  }catch(err){
+    alert("無法啟動語音識別，請確認麥克風權限已允許。");
+    showTargetArea();
+  }
+};
+
+document.getElementById("stopRec").onclick = () => {
+  if(recognition && recognizing) recognition.stop();
+  // 停止後顯示回來（方便對照）
+  showTargetArea();
+};
+
+document.getElementById("clear").onclick = () => {
+  resetRecInput();
+  // 清空後顯示回來（方便準備）
+  showTargetArea();
+};
+
+/* ========= 對比 ========= */
+function tokenize(s){
+  return (s||"")
+    .toLowerCase()
+    .replace(/[“”"’]/g,"'")
+    .replace(/[^a-z0-9'\s]/g," ")
+    .replace(/\s+/g," ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+}
+
+document.getElementById("check").onclick = () => {
+  const target = targetTextEl.textContent;
+  const spoken = userTextEl.value;
+
+  const a = tokenize(target);
+  const b = tokenize(spoken);
+
+  if(a.length===0) return alert("沒有目標片段。");
+  if(b.length===0) return alert("請先背誦或輸入內容。");
+
+  let html = "";
+  for(let i=0;i<a.length;i++){
+    const w = a[i];
+    const s = b[i];
+
+    if(s === w) html += `<span class="ok">${w}</span> `;
+    else if(!s) html += `<span class="miss">[漏:${w}]</span> `;
+    else html += `<span class="wrong">[${w}→${s}]</span> `;
+  }
+  diffOutEl.innerHTML = html;
+
+  // 檢查後顯示課文對照
+  showTargetArea();
+};
+
+/* ========= 支援提示 ========= */
+(function(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  document.getElementById("supportText").textContent =
+    SR ? "語音識別：可用（建議 Android Chrome）" : "語音識別：不可用（可手動輸入）";
+})();
+
+/* ========= 首次載入 ========= */
+window.addEventListener("DOMContentLoaded", () => {
+  const keys = Object.keys(articles).sort();
+  selector.value = keys[keys.length - 1]; // 默選最新的一天
+  selectorRec.value = selector.value;
+  loadCurrentArticle();
+  showTargetArea();
+});
+</script>
+</body>
+</html>
