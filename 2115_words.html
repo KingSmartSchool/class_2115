@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>單字練習（按天選擇）</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, "Noto Sans SC", "Segoe UI", Arial, sans-serif; }
+    body { margin: 0; padding: 16px; background: #f7f7fb; color: #111; }
+    .wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 12px; }
+    header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+    .title { font-size: 20px; font-weight: 900; display:flex; gap:10px; align-items:center; }
+    .card { background: white; border-radius: 16px; padding: 14px; box-shadow: 0 8px 18px rgba(0,0,0,.06); }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    button, select, input {
+      border-radius: 12px; border: 1px solid #ddd; padding: 10px 12px; background: #fff; font-size: 15px;
+    }
+    button { cursor: pointer; }
+    button.primary { background: #111; color: #fff; border-color: #111; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .muted { color: #666; font-size: 13px; }
+    .pill { display:inline-flex; align-items:center; gap:8px; padding: 6px 10px; border-radius: 999px; border: 1px solid #ddd; background:#fff; }
+    .split { display:grid; gap:12px; grid-template-columns: 1fr; }
+    @media (min-width: 920px){ .split { grid-template-columns: 1.25fr .75fr; } }
+    .divider { border:0; border-top:1px solid #eee; margin: 12px 0; }
+
+    /* Start Screen */
+    .startTitle { font-weight: 900; font-size: 18px; }
+    .startBox { display:grid; gap:12px; }
+    .bigBtn { padding: 14px 14px; border-radius: 14px; font-weight: 900; }
+
+    /* Flashcard */
+    .flashWrap { display:grid; gap:10px; justify-items:center; }
+    .flashCard { width: min(560px, 92vw); height: 260px; perspective: 1200px; }
+    .flashInner { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform .5s ease; }
+    .flashInner.flipped { transform: rotateY(180deg); }
+    .face {
+      position: absolute; inset: 0; display:grid; place-items:center;
+      border-radius: 18px; backface-visibility: hidden; border: 1px solid #eee;
+      background: linear-gradient(180deg,#fff,#fafafa);
+    }
+    .back { transform: rotateY(180deg); }
+    .big { font-size: clamp(26px, 4vw, 44px); font-weight: 900; text-align:center; padding: 10px 16px; }
+    .small { font-size: 13px; color:#666; text-align:center; }
+
+    /* Test */
+    .prompt {
+      background: #f3f4ff; border: 1px solid #e6e6ff;
+      border-radius: 14px; padding: 12px;
+      font-size: 22px; font-weight: 900; text-align:center;
+    }
+    .choices { display:grid; gap:10px; grid-template-columns: 1fr; margin-top: 12px; }
+    @media (min-width: 620px){ .choices { grid-template-columns: 1fr 1fr; } }
+    .choiceBtn { padding: 14px 12px; border-radius: 14px; border: 1px solid #ddd; background:#fff; font-weight: 800; text-align:left; }
+    .choiceBtn.correct { border-color: #17a34a; background: #e9f8ef; }
+    .choiceBtn.wrong { border-color: #dc2626; background: #fdecec; }
+
+    .scoreBox { display:grid; gap:8px; padding:12px; border-radius:14px; background:#0b1220; color:#fff; }
+    .scoreBox b { font-size: 22px; }
+    .missBox { font-size: 13px; color:#444; line-height: 1.6; }
+  </style>
+</head>
+
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">📚 單字練習（按天選擇）</div>
+    <div class="row" id="topControls" style="display:none;">
+      <span class="pill">當前：<b id="setName"></b></span>
+
+      <span class="pill">模式：
+        <select id="modeSel">
+          <option value="practice">練習（翻卡）</option>
+          <option value="test">自我測試</option>
+        </select>
+      </span>
+
+      <span class="pill" id="testTypeWrap" style="display:none;">測試：
+        <select id="testTypeSel">
+          <option value="en2zh">看英文選中文</option>
+          <option value="zh2en">看中文選英文</option>
+          <option value="listenSpell">聽音拼字</option>
+        </select>
+      </span>
+
+      <button id="shuffleBtn">洗牌</button>
+      <button id="resetBtn">重置</button>
+      <button id="changeSetBtn">換一天</button>
+    </div>
+  </header>
+
+  <div class="split">
+    <section class="card" id="mainArea"></section>
+
+    <aside class="card" id="sideArea">
+      <div class="row" style="justify-content: space-between;">
+        <b>统计</b>
+        <span class="muted" id="countInfo"></span>
+      </div>
+
+      <div class="scoreBox" style="margin-top:10px;">
+        <div class="muted" style="color:#cbd5e1;">當前分數</div>
+        <div><b id="scoreText">0</b> <span class="muted" style="color:#cbd5e1;">/ <span id="totalText">0</span></span></div>
+      </div>
+
+      <hr class="divider">
+      <div class="muted">錯題記錄（最近10條）</div>
+      <div id="missBox" class="missBox"></div>
+
+      <hr class="divider">
+      <div class="muted">
+        聽音批字：使用瀏覽器語音（TTS）。如果沒聲音，請檢查靜音/媒體音量；部分瀏覽器需要先點按鈕才允許播放。
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+/** =========================
+ * 老師固定提供：按“天/文章”分組
+ * 你只需要在 VOCAB_SETS 裡新增更多天的單字即可
+ * ========================= */
+const VOCAB_SETS = [
+  {
+    name: "Day 1（20260121-1）",
+    words: [
+      { en: "tadpole", zh: "蝌蚪" },
+      { en: "goose geese", zh: "鵝" },
+      { en: "pen", zh: "原子筆；圈（ㄐㄩㄢˋ）" },
+      { en: "leave left", zh: "留下；離開" },
+      { en: "lock the door", zh: "鎖門" },
+    ],
+  },
+  {
+    name: "Day 2（20260121-2）",
+    words: [
+      { en: "chase chased", zh: "追趕" },
+      { en: "a group of", zh: "一群" },
+      { en: "bite bit bitten", zh: "啄；咬" },
+      { en: "stick insect", zh: "竹節蟲" },
+      { en: "stick", zh: "棍子、棒子" },
+    ],
+  },
+  {
+    name: "Day 3（20260121-3）",
+    words: [
+      { en: "insect", zh: "昆蟲" },
+      { en: "spit spat spat", zh: "吐（口水）" },
+      { en: "dodge ball", zh: "躲避球" },
+      { en: "light", zh: "輕的；淺色的；明亮的；燈" },
+      { en: "heavy", zh: "重的" },
+    ],
+  },
+  {
+    name: "Day 4（20260121-4）",
+    words: [
+      { en: "rise rose risen", zh: "上升" },
+      { en: "squirrel", zh: "松鼠" },
+      { en: "owl", zh: "貓頭鷹" },
+      { en: "woodpecker", zh: "啄木鳥" },
+      { en: "go went gone", zh: "去" },
+    ],
+  },
+  {
+    name: "Day 5（20260121-5）",
+    words: [
+      { en: "last", zh: "最後的" },
+      { en: "feel felt", zh: "感覺" },
+      { en: "peaceful", zh: "和平的" },
+      { en: "story", zh: "故事" },
+      { en: "at the beginning", zh: "在一開始" },
+      { en: "at the end", zh: "在最後；在結尾" },
+    ],
+  },
+];
+
+/* ===== 工具 ===== */
+const $ = (id) => document.getElementById(id);
+
+function shuffle(arr){
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function sample(arr, n){
+  return shuffle(arr).slice(0, n);
+}
+function speak(text){
+  try{
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-US";
+    u.rate = 0.95;
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+/* ===== 狀態 ===== */
+let currentSetIndex = -1;
+let words = [];
+let order = [];
+let idx = 0;
+
+let mode = "practice";
+let testType = "en2zh"; // en2zh | zh2en | listenSpell
+
+let score = 0;
+let total = 0;
+let misses = []; // {q, right, picked}
+
+/* ===== 右側統計 ===== */
+function updateSide(){
+  $("scoreText").textContent = String(score);
+  $("totalText").textContent = String(total);
+  $("countInfo").textContent = currentSetIndex >= 0 ? `共 ${words.length} 个单词` : "";
+  const m = misses.slice(-10).reverse();
+  $("missBox").innerHTML = m.length
+    ? m.map(x => `• <b>${escapeHtml(x.q)}</b> → ✅ ${escapeHtml(x.right)}　（你选：${escapeHtml(x.picked)}）`).join("<br>")
+    : `<span class="muted">暂无</span>`;
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, m => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[m]));
+}
+
+/* ===== Start Screen（選 Day） ===== */
+function renderStart(){
+  $("topControls").style.display = "none";
+  $("mainArea").innerHTML = `
+    <div class="startBox">
+      <div class="startTitle">先選擇今天要練哪一天</div>
+      <div class="row">
+        <select id="startSetSel" style="min-width:260px;"></select>
+        <button class="primary bigBtn" id="startBtn">開始</button>
+      </div>
+      <div class="muted"></div>
+    </div>
+  `;
+  const sel = $("startSetSel");
+  VOCAB_SETS.forEach((s, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+  $("startBtn").onclick = () => {
+    const i = Number(sel.value);
+    loadSet(i);
+  };
+  updateSide();
+}
+
+/* ===== 上方控制列：顯示/隱藏「測試方式」 ===== */
+function updateTopTestTypeUI(){
+  const wrap = $("testTypeWrap");
+  if (!wrap) return;
+
+  if (currentSetIndex >= 0 && ($("modeSel").value === "test")) {
+    wrap.style.display = "inline-flex";
+  } else {
+    wrap.style.display = "none";
+  }
+}
+
+/* ===== 載入某一天 ===== */
+function loadSet(i){
+  currentSetIndex = i;
+  words = VOCAB_SETS[i].words.slice();
+  order = shuffle(words.map((_, k) => k));
+  idx = 0;
+  score = 0;
+  misses = [];
+  total = 0;
+
+  $("setName").textContent = VOCAB_SETS[i].name;
+  $("topControls").style.display = "flex";
+
+  mode = $("modeSel").value || "practice";
+  updateTopTestTypeUI();
+  render();
+  updateSide();
+}
+
+/* ===== 練習（翻卡） ===== */
+function renderPractice(){
+  const w = words[order[idx]];
+  $("mainArea").innerHTML = `
+    <div class="flashWrap">
+      <div class="muted">點卡片翻面；或用下方按鈕</div>
+
+      <div class="flashCard">
+        <div class="flashInner" id="flashInner">
+          <div class="face front">
+            <div>
+              <div class="big">${escapeHtml(w.en)}</div>
+              <div class="small">（點一下看中文）</div>
+            </div>
+          </div>
+          <div class="face back">
+            <div>
+              <div class="big">${escapeHtml(w.zh)}</div>
+              <div class="small">（點一下回英文）</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="ttsBtn">🔊 發音</button>
+        <button id="flipBtn">翻面</button>
+        <button id="prevBtn">上一个</button>
+        <button class="primary" id="nextBtn">下一个</button>
+      </div>
+
+      <div class="muted">進度：${idx + 1} / ${order.length}</div>
+    </div>
+  `;
+
+  const inner = $("flashInner");
+  const flip = () => inner.classList.toggle("flipped");
+  inner.onclick = flip;
+  $("flipBtn").onclick = flip;
+  $("ttsBtn").onclick = () => speak(w.en);
+
+  $("prevBtn").onclick = () => {
+    idx = (idx - 1 + order.length) % order.length;
+    renderPractice();
+  };
+  $("nextBtn").onclick = () => {
+    idx = (idx + 1) % order.length;
+    renderPractice();
+  };
+}
+
+/* ===== 測驗題：兩種選擇題 ===== */
+function makeTestQuestion(){
+  const w = words[order[idx]];
+
+  if (testType === "en2zh") {
+    const correct = w.zh;
+    const wrongPool = words.filter(x => x.zh !== correct).map(x => x.zh);
+    const wrongs = sample(wrongPool, Math.min(3, wrongPool.length));
+    const options = shuffle([correct, ...wrongs]);
+    return { q: w.en, correct, options, tts: w.en };
+  }
+
+  if (testType === "zh2en") {
+    const correct = w.en;
+    const wrongPool = words.filter(x => x.en !== correct).map(x => x.en);
+    const wrongs = sample(wrongPool, Math.min(3, wrongPool.length));
+    const options = shuffle([correct, ...wrongs]);
+    return { q: w.zh, correct, options, tts: w.en };
+  }
+
+  return null;
+}
+
+/* ===== 聽音拼字 ===== */
+function normalizeSpell(s){
+  return String(s).trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function renderListenSpell(){
+  const w = words[order[idx]];
+  const answer = w.en;
+
+  $("mainArea").innerHTML = `
+    <div>
+      <div class="row" style="justify-content:space-between;">
+        <div class="muted">聽音拼字（輸入英文）</div>
+        <div class="muted">進度：${idx + 1} / ${order.length}</div>
+      </div>
+
+      <div class="prompt">🔊 請聽音，輸入英文</div>
+
+      <div class="row" style="margin-top:10px;">
+        <button id="ttsBtn">🔊 播放</button>
+        <button id="revealBtn">顯示答案</button>
+        <button id="skipBtn">跳過</button>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <input id="spellInput" placeholder="Type here..." style="flex:1; min-width:240px;" />
+        <button class="primary" id="checkBtn">提交</button>
+      </div>
+
+      <div id="spellFeedback" class="muted" style="margin-top:10px;"></div>
+      <div class="muted" style="margin-top:10px;">提示：大小寫不影響；多餘空格會自動忽略</div>
+    </div>
+  `;
+
+  const input = $("spellInput");
+  const feedback = $("spellFeedback");
+
+  $("ttsBtn").onclick = () => speak(answer);
+
+  $("skipBtn").onclick = () => {
+    idx = (idx + 1) % order.length;
+    renderListenSpell();
+  };
+
+  $("revealBtn").onclick = () => {
+    feedback.innerHTML = `答案：<b>${escapeHtml(answer)}</b>（${escapeHtml(w.zh)}）`;
+  };
+
+  function grade(){
+    const user = normalizeSpell(input.value);
+    const right = normalizeSpell(answer);
+
+    total += 1;
+
+    if (user && user === right) {
+      score += 1;
+      feedback.innerHTML = `✅ 正確！答案是：<b>${escapeHtml(answer)}</b>`;
+    } else {
+      feedback.innerHTML = `❌ 不對喔～ 正確答案是：<b>${escapeHtml(answer)}</b>`;
+      misses.push({ q: `🔊（聽音）`, right: answer, picked: input.value || "(空白)" });
+    }
+
+    updateSide();
+
+    setTimeout(() => {
+      idx = (idx + 1) % order.length;
+      renderListenSpell();
+    }, 700);
+  }
+
+  $("checkBtn").onclick = grade;
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") grade();
+  });
+
+  input.focus();
+}
+
+/* ===== 測驗渲染（包含三種方式） ===== */
+function renderTest(){
+  // 1) 聽音拼字
+  if (testType === "listenSpell") {
+    renderListenSpell();
+    return;
+  }
+
+  // 2) 選擇題
+  const q = makeTestQuestion();
+  if (!q) return;
+
+  const titleText = (testType === "zh2en") ? "選出正確英文" : "選出正確中文";
+
+  $("mainArea").innerHTML = `
+    <div>
+      <div class="row" style="justify-content:space-between;">
+        <div class="muted">${titleText}</div>
+        <div class="muted">進度：${idx + 1} / ${order.length}</div>
+      </div>
+
+      <div class="prompt">${escapeHtml(q.q)}</div>
+
+<div class="row" style="margin-top:10px;">
+  ${testType === "en2zh" ? `<button id="ttsBtn">🔊 發音</button>` : ``}
+  <button id="skipBtn">跳過</button>
+</div>
+
+
+      <div class="choices" id="choices"></div>
+
+      <div class="muted" style="margin-top:10px;">提示：答題後會自動進入下一題</div>
+    </div>
+  `;
+
+if (testType === "en2zh") {
+  $("ttsBtn").onclick = () => speak(q.tts);
+}
+
+  const box = $("choices");
+  q.options.forEach(opt => {
+    const b = document.createElement("button");
+    b.className = "choiceBtn";
+    b.textContent = opt;
+
+    b.onclick = () => {
+      total += 1;
+
+      const isRight = opt === q.correct;
+      if (isRight) {
+        score += 1;
+        b.classList.add("correct");
+      } else {
+        b.classList.add("wrong");
+        misses.push({ q: q.q, right: q.correct, picked: opt });
+      }
+
+      [...box.querySelectorAll("button")].forEach(btn => {
+        if (btn.textContent === q.correct) btn.classList.add("correct");
+        btn.disabled = true;
+      });
+
+      updateSide();
+
+      setTimeout(() => {
+        idx = (idx + 1) % order.length;
+        renderTest();
+      }, 550);
+    };
+
+    box.appendChild(b);
+  });
+
+  $("skipBtn").onclick = () => {
+    idx = (idx + 1) % order.length;
+    renderTest();
+  };
+}
+
+/* ===== 入口 render ===== */
+function render(){
+  if (currentSetIndex < 0) return renderStart();
+
+  mode = $("modeSel").value || mode;
+
+  updateTopTestTypeUI();
+  if ($("testTypeSel")) testType = $("testTypeSel").value;
+
+  if (mode === "practice") renderPractice();
+  else renderTest();
+
+  updateSide();
+}
+
+/* ===== 上方控制列 ===== */
+$("modeSel").addEventListener("change", () => {
+  updateTopTestTypeUI();
+  render();
+});
+
+$("testTypeSel").addEventListener("change", () => {
+  testType = $("testTypeSel").value;
+  render();
+});
+
+$("shuffleBtn").onclick = () => {
+  if (currentSetIndex < 0) return;
+  order = shuffle(words.map((_, k) => k));
+  idx = 0;
+  render();
+};
+
+$("resetBtn").onclick = () => {
+  if (currentSetIndex < 0) return;
+  idx = 0;
+  score = 0;
+  total = 0;
+  misses = [];
+  render();
+};
+
+$("changeSetBtn").onclick = () => {
+  currentSetIndex = -1;
+  words = [];
+  order = [];
+  idx = 0;
+  score = 0;
+  total = 0;
+  misses = [];
+  renderStart();
+};
+
+/* ===== 初始化 ===== */
+renderStart();
+</script>
+</body>
+</html>
