@@ -94,7 +94,7 @@
 
     <aside class="card" id="sideArea">
       <div class="row" style="justify-content: space-between;">
-        <b>统计</b>
+        <b>統計</b>
         <span class="muted" id="countInfo"></span>
       </div>
 
@@ -251,7 +251,7 @@ let misses = []; // {q, right, picked}
 function updateSide(){
   $("scoreText").textContent = String(score);
   $("totalText").textContent = String(total);
-  $("countInfo").textContent = currentSetIndex >= 0 ? `共 ${words.length} 个单词` : "";
+  $("countInfo").textContent = currentSetIndex >= 0 ? `共 ${words.length} 個單字` : "";
   const m = misses.slice(-10).reverse();
   $("missBox").innerHTML = m.length
     ? m.map(x => `• <b>${escapeHtml(x.q)}</b> → ✅ ${escapeHtml(x.right)}　（你选：${escapeHtml(x.picked)}）`).join("<br>")
@@ -348,8 +348,8 @@ function renderPractice(){
       <div class="row">
         <button id="ttsBtn">🔊 發音</button>
         <button id="flipBtn">翻面</button>
-        <button id="prevBtn">上一个</button>
-        <button class="primary" id="nextBtn">下一个</button>
+        <button id="prevBtn">上一個</button>
+        <button class="primary" id="nextBtn">下一個</button>
       </div>
 
       <div class="muted">進度：${idx + 1} / ${order.length}</div>
@@ -610,4 +610,5 @@ renderStart();
 </script>
 </body>
 </html>
+
 
