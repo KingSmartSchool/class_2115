@@ -18,12 +18,13 @@
   textarea{
     width:100%; height:120px; border-radius:12px; border:1px solid #ddd; padding:12px; box-sizing:border-box;
   }
-  .target{font-size:16px; line-height:1.7; white-space:pre-wrap;}
+  .target{font-size:16px; line-height:1.7;}
   .muted{color:#666; font-size:12px; line-height:1.5;}
   .ok{background:#eaffea;padding:2px 4px;border-radius:6px;}
   .miss{background:#ffecec;padding:2px 4px;border-radius:6px;}
   .wrong{background:#e8f0ff;padding:2px 4px;border-radius:6px;}
   .titleRow{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .sp10{height:10px;}
 </style>
 </head>
 
@@ -61,7 +62,7 @@
       <div class="muted" id="articleMeta"></div>
 
       <div style="margin-top:10px;">
-        <div class="muted">文章內容：</div>
+        <div class="muted">文章內容（英文 + 繁中翻譯）：</div>
         <div id="articleBody" class="target"></div>
       </div>
     </div>
@@ -97,7 +98,7 @@
 
       <!-- ✅ 目標片段區塊：開始識別後會整塊隱藏 -->
       <div id="targetArea" style="margin-top:12px;">
-        <div class="muted">目標片段：</div>
+        <div class="muted">目標片段（英文 + 繁中翻譯）：</div>
         <div id="targetText" class="target"></div>
         <div class="muted" id="progress"></div>
       </div>
@@ -116,11 +117,11 @@
 
       <div style="margin-top:10px;">
         <div class="muted">你的背誦內容：</div>
-        <textarea id="userText" placeholder="識別結果會出現在這里；或你也可以手動輸入再檢查。"></textarea>
+        <textarea id="userText" placeholder="識別結果會出現在這裡；或你也可以手動輸入再檢查。"></textarea>
       </div>
 
       <div style="margin-top:12px;">
-        <div class="muted">對比結果：</div>
+        <div class="muted">對比結果（只比對英文）：</div>
         <div id="diffOut"></div>
       </div>
     </div>
@@ -129,7 +130,11 @@
 </div>
 
 <script>
-/* ========= 文章資料 ========= */
+/* ========= 朗讀速度設定 ========= */
+const NORMAL_RATE = 1;
+const SLOW_RATE = 0.6; // 如果你覺得還不慢，可改 0.5
+
+/* ========= 文章資料（英文 text + 繁中 zh，逐句換行對齊） ========= */
 const articles = {
   "2026-01-22":{
     title:"2026/01/22",
@@ -152,7 +157,6 @@ At the end, the tadpole swam back home and rested quietly.
 最後，蝌蚪游回家，安靜地休息。
 `
   },
-
   "2026-01-14":{
     title:"2026/01/14",
     text:`A group of travelers from Asia arrived in Africa and stopped near a quiet pond.
@@ -170,6 +174,32 @@ As the sun went down, we chased after the last light of the day and felt peacefu
   }
 };
 
+/* ========= 工具：切行/HTML 轉義/雙語渲染 ========= */
+function splitLines(t){
+  return (t||"")
+    .replace(/\r\n/g,"\n")
+    .split("\n")
+    .map(s=>s.trim())
+    .filter(Boolean);
+}
+
+function escHtml(s){
+  return (s||"").replace(/[&<>"']/g, m => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[m]));
+}
+
+function renderBilingual(enLines, zhLines){
+  let html = "";
+  for(let i=0;i<enLines.length;i++){
+    const en = enLines[i] || "";
+    const zh = zhLines[i] || "";
+    html += `<div>${escHtml(en)}</div>`;
+    if(zh) html += `<div class="muted" style="margin-top:4px;">${escHtml(zh)}</div>`;
+    html += `<div class="sp10"></div>`;
+  }
+  return html;
+}
 
 /* ========= DOM ========= */
 const pageView = document.getElementById("pageView");
@@ -191,6 +221,26 @@ const diffOutEl = document.getElementById("diffOut");
 const recMetaEl = document.getElementById("recMeta");
 const recTitleLineEl = document.getElementById("recTitleLine");
 
+const articleTitleEl = document.getElementById("articleTitle");
+const articleMetaEl  = document.getElementById("articleMeta");
+const articleBodyEl  = document.getElementById("articleBody");
+
+/* ========= 功能切換 ========= */
+tabView.onclick = () => {
+  pageView.style.display = "";
+  pageRec.style.display = "none";
+  tabView.classList.add("primary");
+  tabRec.classList.remove("primary");
+};
+
+tabRec.onclick = () => {
+  pageView.style.display = "none";
+  pageRec.style.display = "";
+  tabRec.classList.add("primary");
+  tabView.classList.remove("primary");
+  syncAndLoad("view", true);
+};
+
 /* ========= 初始化選單 ========= */
 function buildSelectors(){
   selector.innerHTML = "";
@@ -207,32 +257,43 @@ function buildSelectors(){
 }
 buildSelectors();
 
-/* ========= 分段 ========= */
-let lines = [];
-let segments = [];
+/* ========= 分段（英文/中文同步） ========= */
+let linesEn = [];
+let linesZh = [];
+let segmentsEn = [];
+let segmentsZh = [];
 let idx = 0;
 
-function splitLines(t){
-  return t.replace(/\r\n/g,"\n").split("\n").map(s=>s.trim()).filter(Boolean);
-}
+// ✅ 檢查只用英文，避免中文干擾
+let currentTargetEnPlain = "";
 
 function buildSegments(mode){
   if(mode==="full"){
-    segments = [lines.join(" ")];
+    segmentsEn = [linesEn.join(" ")];
+    segmentsZh = [linesZh.join(" ")];
     idx = 0;
     return;
   }
   const size = (mode==="single") ? 1 : 3;
-  segments = [];
-  for(let i=0;i<lines.length;i+=size){
-    segments.push(lines.slice(i,i+size).join(" "));
+  segmentsEn = [];
+  segmentsZh = [];
+  for(let i=0;i<linesEn.length;i+=size){
+    segmentsEn.push(linesEn.slice(i,i+size).join(" "));
+    segmentsZh.push(linesZh.slice(i,i+size).join(" "));
   }
   idx = 0;
 }
 
 function renderTarget(){
-  targetTextEl.textContent = segments[idx] || "";
-  progressEl.textContent = `進度 ${idx+1}/${segments.length}`;
+  const en = segmentsEn[idx] || "";
+  const zh = segmentsZh[idx] || "";
+  currentTargetEnPlain = en;
+
+  targetTextEl.innerHTML =
+    `<div>${escHtml(en)}</div>` +
+    (zh ? `<div class="muted" style="margin-top:6px;">${escHtml(zh)}</div>` : "");
+
+  progressEl.textContent = `進度 ${idx+1}/${segmentsEn.length}`;
 }
 
 /* ========= 顯示/隱藏目標片段 ========= */
@@ -252,207 +313,34 @@ function resetRecInput(){
   lastFinalChunk = "";
 }
 
-/* ========= ✅ 朗讀（正常 + 慢速逐句） ========= */
-const btnTtsFullNormal = document.getElementById("ttsFullNormal");
-const btnTtsFullSlow   = document.getElementById("ttsFullSlow");
-const btnTtsPause      = document.getElementById("ttsPause");
-const btnTtsResume     = document.getElementById("ttsResume");
-const btnTtsStop       = document.getElementById("ttsStop");
-const btnTtsTargetNormal = document.getElementById("ttsTargetNormal");
-const btnTtsTargetSlow   = document.getElementById("ttsTargetSlow");
-
-let slowTimer = null;
-let slowPlaying = false;
-let slowQueue = [];
-let slowIndex = 0;
-
-function setTtsButtons(state){
-  if(state === "idle"){
-    btnTtsPause.disabled = true;
-    btnTtsResume.disabled = true;
-    btnTtsStop.disabled = true;
-  }else if(state === "playing"){
-    btnTtsPause.disabled = false;
-    btnTtsResume.disabled = true;
-    btnTtsStop.disabled = false;
-  }else if(state === "paused"){
-    btnTtsPause.disabled = true;
-    btnTtsResume.disabled = false;
-    btnTtsStop.disabled = false;
-  }
-}
-setTtsButtons("idle");
-
-function stopAllTts(){
-  try { window.speechSynthesis.cancel(); } catch(e) {}
-  if(slowTimer) clearTimeout(slowTimer);
-  slowPlaying = false;
-  setTtsButtons("idle");
-}
-
-function speak(text, rate = 1){
-  if(!("speechSynthesis" in window)){
-    alert("此瀏覽器不支持朗讀。");
-    return;
-  }
-  stopAllTts();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = "en-US";
-  u.rate = rate;
-  u.onstart = () => setTtsButtons("playing");
-  u.onend   = () => setTtsButtons("idle");
-  u.onerror = () => setTtsButtons("idle");
-  window.speechSynthesis.speak(u);
-  setTimeout(()=>setTtsButtons("playing"), 120);
-}
-
-// ✅ 慢速：逐句朗讀 + 句間停頓（不依賴 rate 生效）
-function splitSentences(text){
-  return (text || "")
-    .replace(/\r\n/g,"\n")
-    .replace(/\n+/g," ")
-    .trim()
-    .split(/(?<=[.!?])\s+/)
-    .map(s=>s.trim())
-    .filter(Boolean);
-}
-
-function speakSlow(text, rate = 0.9, gapMs = 320){
-  if(!("speechSynthesis" in window)){
-    alert("此瀏覽器不支持朗讀。");
-    return;
-  }
-  stopAllTts();
-
-  slowQueue = splitSentences(text);
-  slowIndex = 0;
-  slowPlaying = true;
-
-  if(!slowQueue.length){
-    slowPlaying = false;
-    setTtsButtons("idle");
-    return;
-  }
-
-  setTtsButtons("playing");
-
-  const speakNext = () => {
-    if(!slowPlaying) return;
-
-    // 如果使用者按了暫停，等一下再檢查（避免 gap 時也往下跑）
-    if(window.speechSynthesis.paused){
-      slowTimer = setTimeout(speakNext, 120);
-      return;
-    }
-
-    if(slowIndex >= slowQueue.length){
-      slowPlaying = false;
-      setTtsButtons("idle");
-      return;
-    }
-
-    const u = new SpeechSynthesisUtterance(slowQueue[slowIndex]);
-    u.lang = "en-US";
-    u.rate = rate; // 有些機型會忽略，但我們有 gap 仍會變慢
-
-    u.onend = () => {
-      slowIndex++;
-      slowTimer = setTimeout(speakNext, gapMs);
-    };
-    u.onerror = () => {
-      slowPlaying = false;
-      setTtsButtons("idle");
-    };
-
-    window.speechSynthesis.speak(u);
-  };
-
-  speakNext();
-}
-
-btnTtsFullNormal.onclick = () => {
-  const full = articles[selector.value].text.replace(/\n/g," ");
-  speak(full, 1);
-};
-btnTtsFullSlow.onclick = () => {
-  const full = articles[selector.value].text;
-  speakSlow(full, 0.9, 330);
-};
-
-btnTtsTargetNormal.onclick = () => {
-  const t = (segments[idx] || "").trim();
-  if(!t) return;
-  speak(t, 1);
-};
-btnTtsTargetSlow.onclick = () => {
-  const t = (segments[idx] || "").trim();
-  if(!t) return;
-  speakSlow(t, 0.9, 280);
-};
-
-btnTtsPause.onclick = () => {
-  try{
-    window.speechSynthesis.pause();
-    setTtsButtons("paused");
-  }catch(e){}
-};
-btnTtsResume.onclick = () => {
-  try{
-    window.speechSynthesis.resume();
-    setTtsButtons("playing");
-  }catch(e){}
-};
-btnTtsStop.onclick = () => {
-  stopAllTts();
-};
-
-/* ========= 功能切換 ========= */
-tabView.onclick = () => {
-  stopAllTts();
-  pageView.style.display = "";
-  pageRec.style.display = "none";
-  tabView.classList.add("primary");
-  tabRec.classList.remove("primary");
-};
-
-tabRec.onclick = () => {
-  stopAllTts();
-  pageView.style.display = "none";
-  pageRec.style.display = "";
-  tabRec.classList.add("primary");
-  tabView.classList.remove("primary");
-  syncAndLoad("view", true);
-};
-
 /* ========= 載入文章（核心） ========= */
 function loadCurrentArticle(){
-  stopAllTts(); // ✅ 換文章就停朗讀
-
   const key = selector.value;
   const a = articles[key];
 
+  // 英文/中文逐句切行
+  linesEn = splitLines(a.text);
+  linesZh = splitLines(a.zh || "");
+  while(linesZh.length < linesEn.length) linesZh.push("");
+
   // 展示頁
-  document.getElementById("articleTitle").textContent = a.title;
-  lines = splitLines(a.text);
-  document.getElementById("articleMeta").textContent = `共 ${lines.length} 句`;
-  document.getElementById("articleBody").textContent = a.text.trim();
+  articleTitleEl.textContent = a.title;
+  articleMetaEl.textContent = `共 ${linesEn.length} 句`;
+  articleBodyEl.innerHTML = renderBilingual(linesEn, linesZh);
 
   // 背誦頁標題/句數
-  recMetaEl.textContent = `共 ${lines.length} 句`;
+  recMetaEl.textContent = `共 ${linesEn.length} 句`;
   recTitleLineEl.textContent = `當前：${a.title}`;
 
   // 重建分段並渲染
   buildSegments(modeEl.value);
   renderTarget();
 
-  // 每次載入文章：讓課文可見（方便準備）
+  // 每次載入：先顯示（方便準備）
   showTargetArea();
 }
 
-loadArticleBtn.onclick = () => {
-  loadCurrentArticle();
-  showTargetArea();
-};
+loadArticleBtn.onclick = () => { loadCurrentArticle(); showTargetArea(); };
 
 loadArticleRecBtn.onclick = () => {
   selector.value = selectorRec.value;
@@ -477,7 +365,7 @@ function syncAndLoad(from, reset=false){
 selector.addEventListener("change", () => syncAndLoad("view", true));
 selectorRec.addEventListener("change", () => syncAndLoad("rec", true));
 
-/* ========= 切換模式：回到第1段+清空+顯示課文 ========= */
+/* ========= 切換模式 ========= */
 modeEl.addEventListener("change", () => {
   buildSegments(modeEl.value);
   idx = 0;
@@ -486,7 +374,7 @@ modeEl.addEventListener("change", () => {
   showTargetArea();
 });
 
-/* ========= 上一段/下一段：切段時顯示課文（準備） ========= */
+/* ========= 上一段/下一段 ========= */
 document.getElementById("prev").onclick = () => {
   if(idx>0){
     idx--;
@@ -496,7 +384,7 @@ document.getElementById("prev").onclick = () => {
   }
 };
 document.getElementById("next").onclick = () => {
-  if(idx<segments.length-1){
+  if(idx<segmentsEn.length-1){
     idx++;
     renderTarget();
     resetRecInput();
@@ -504,13 +392,84 @@ document.getElementById("next").onclick = () => {
   }
 };
 
-/* ========= ✅ 語音識別（防重覆爆字） ========= */
+/* ========= 朗讀（含暫停/繼續/停止 + 正常/慢速） ========= */
+const btnTtsFullNormal = document.getElementById("ttsFullNormal");
+const btnTtsFullSlow = document.getElementById("ttsFullSlow");
+const btnTtsPause = document.getElementById("ttsPause");
+const btnTtsResume = document.getElementById("ttsResume");
+const btnTtsStop = document.getElementById("ttsStop");
+const btnTtsTargetNormal = document.getElementById("ttsTargetNormal");
+const btnTtsTargetSlow = document.getElementById("ttsTargetSlow");
+
+function setTtsButtons(state){
+  if(state === "idle"){
+    btnTtsPause.disabled = true;
+    btnTtsResume.disabled = true;
+    btnTtsStop.disabled = true;
+  }else if(state === "playing"){
+    btnTtsPause.disabled = false;
+    btnTtsResume.disabled = true;
+    btnTtsStop.disabled = false;
+  }else if(state === "paused"){
+    btnTtsPause.disabled = true;
+    btnTtsResume.disabled = false;
+    btnTtsStop.disabled = false;
+  }
+}
+setTtsButtons("idle");
+
+function speak(text, rate){
+  if(!("speechSynthesis" in window)){
+    alert("此瀏覽器不支援朗讀。");
+    return;
+  }
+  try{ window.speechSynthesis.cancel(); }catch(e){}
+
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US";
+  u.rate = rate;
+
+  u.onstart = () => setTtsButtons("playing");
+  u.onend = () => setTtsButtons("idle");
+  u.onerror = () => setTtsButtons("idle");
+
+  window.speechSynthesis.speak(u);
+
+  // 某些手機需要延遲一下才會把按鈕狀態切到 playing
+  setTimeout(()=>setTtsButtons("playing"), 120);
+}
+
+btnTtsFullNormal.onclick = () => {
+  const full = (articles[selector.value].text || "").replace(/\n/g," ");
+  speak(full, NORMAL_RATE);
+};
+btnTtsFullSlow.onclick = () => {
+  const full = (articles[selector.value].text || "").replace(/\n/g," ");
+  speak(full, SLOW_RATE);
+};
+
+btnTtsPause.onclick = () => { try{ window.speechSynthesis.pause(); setTtsButtons("paused"); }catch(e){} };
+btnTtsResume.onclick = () => { try{ window.speechSynthesis.resume(); setTtsButtons("playing"); }catch(e){} };
+btnTtsStop.onclick = () => { try{ window.speechSynthesis.cancel(); }catch(e){} setTtsButtons("idle"); };
+
+btnTtsTargetNormal.onclick = () => {
+  const t = (segmentsEn[idx] || "").trim();
+  if(!t) return;
+  speak(t, NORMAL_RATE);
+};
+btnTtsTargetSlow.onclick = () => {
+  const t = (segmentsEn[idx] || "").trim();
+  if(!t) return;
+  speak(t, SLOW_RATE);
+};
+
+/* ========= 語音識別 ========= */
 document.getElementById("startRec").onclick = () => {
   hideTargetArea();
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!SR){
-    alert("此瀏覽器不支持語音識別。建議 Android Chrome + https。");
+    alert("此瀏覽器不支援語音識別。建議 Android Chrome + https。");
     showTargetArea();
     return;
   }
@@ -554,9 +513,8 @@ document.getElementById("startRec").onclick = () => {
     }
   };
 
-  try{
-    recognition.start();
-  }catch(err){
+  try{ recognition.start(); }
+  catch(err){
     alert("無法啟動語音識別，請確認麥克風權限已允許。");
     showTargetArea();
   }
@@ -572,7 +530,7 @@ document.getElementById("clear").onclick = () => {
   showTargetArea();
 };
 
-/* ========= 對比 ========= */
+/* ========= 對比（只比對英文） ========= */
 function tokenize(s){
   return (s||"")
     .toLowerCase()
@@ -585,7 +543,7 @@ function tokenize(s){
 }
 
 document.getElementById("check").onclick = () => {
-  const target = targetTextEl.textContent;
+  const target = currentTargetEnPlain; // ✅ 只比對英文
   const spoken = userTextEl.value;
 
   const a = tokenize(target);
@@ -604,6 +562,7 @@ document.getElementById("check").onclick = () => {
     else html += `<span class="wrong">[${w}→${s}]</span> `;
   }
   diffOutEl.innerHTML = html;
+
   showTargetArea();
 };
 
@@ -625,4 +584,3 @@ window.addEventListener("DOMContentLoaded", () => {
 </script>
 </body>
 </html>
-
