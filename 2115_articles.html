@@ -133,22 +133,22 @@
 const articles = {
   "2026-01-22":{
     title:"2026/01/22",
-    text:`At the beginning, a tadpole lived in a pond. 
-One day, a goose came and chased it. 
-The tadpole was scared and felt cold. 
-It left the water and hid under a stick. 
-Nearby, an insect moved slowly. 
-After a while, the goose went away. 
-The pond became peaceful again. 
+    text:`At the beginning, a tadpole lived in a pond.
+One day, a goose came and chased it.
+The tadpole was scared and felt cold.
+It left the water and hid under a stick.
+Nearby, an insect moved slowly.
+After a while, the goose went away.
+The pond became peaceful again.
 At the end, the tadpole swam back home and rested quietly.
 `
   },
   "2026-01-14":{
     title:"2026/01/14",
-    text:`A group of travelers from Asia arrived in Africa and stopped near a quiet pond. 
-Under a tall coconut tree, I met a new friend and helped him feed the birds. 
-Later, we walked to a hot spring, where white smoke rose into the sky. 
-A small animal came out of a tree hole, and we laughed together. 
+    text:`A group of travelers from Asia arrived in Africa and stopped near a quiet pond.
+Under a tall coconut tree, I met a new friend and helped him feed the birds.
+Later, we walked to a hot spring, where white smoke rose into the sky.
+A small animal came out of a tree hole, and we laughed together.
 As the sun went down, we chased after the last light of the day and felt peaceful and happy.
 `
   }
@@ -173,22 +173,6 @@ const userTextEl = document.getElementById("userText");
 const diffOutEl = document.getElementById("diffOut");
 const recMetaEl = document.getElementById("recMeta");
 const recTitleLineEl = document.getElementById("recTitleLine");
-
-/* ========= 功能切換 ========= */
-tabView.onclick = () => {
-  pageView.style.display = "";
-  pageRec.style.display = "none";
-  tabView.classList.add("primary");
-  tabRec.classList.remove("primary");
-};
-
-tabRec.onclick = () => {
-  pageView.style.display = "none";
-  pageRec.style.display = "";
-  tabRec.classList.add("primary");
-  tabView.classList.remove("primary");
-  syncAndLoad("view", true);
-};
 
 /* ========= 初始化選單 ========= */
 function buildSelectors(){
@@ -235,12 +219,8 @@ function renderTarget(){
 }
 
 /* ========= 顯示/隱藏目標片段 ========= */
-function showTargetArea(){
-  targetAreaEl.style.display = "";
-}
-function hideTargetArea(){
-  targetAreaEl.style.display = "none";
-}
+function showTargetArea(){ targetAreaEl.style.display = ""; }
+function hideTargetArea(){ targetAreaEl.style.display = "none"; }
 
 /* ========= 清空背誦輸入 ========= */
 let recognition = null;
@@ -255,9 +235,182 @@ function resetRecInput(){
   lastFinalChunk = "";
 }
 
-  
+/* ========= ✅ 朗讀（正常 + 慢速逐句） ========= */
+const btnTtsFullNormal = document.getElementById("ttsFullNormal");
+const btnTtsFullSlow   = document.getElementById("ttsFullSlow");
+const btnTtsPause      = document.getElementById("ttsPause");
+const btnTtsResume     = document.getElementById("ttsResume");
+const btnTtsStop       = document.getElementById("ttsStop");
+const btnTtsTargetNormal = document.getElementById("ttsTargetNormal");
+const btnTtsTargetSlow   = document.getElementById("ttsTargetSlow");
+
+let slowTimer = null;
+let slowPlaying = false;
+let slowQueue = [];
+let slowIndex = 0;
+
+function setTtsButtons(state){
+  if(state === "idle"){
+    btnTtsPause.disabled = true;
+    btnTtsResume.disabled = true;
+    btnTtsStop.disabled = true;
+  }else if(state === "playing"){
+    btnTtsPause.disabled = false;
+    btnTtsResume.disabled = true;
+    btnTtsStop.disabled = false;
+  }else if(state === "paused"){
+    btnTtsPause.disabled = true;
+    btnTtsResume.disabled = false;
+    btnTtsStop.disabled = false;
+  }
+}
+setTtsButtons("idle");
+
+function stopAllTts(){
+  try { window.speechSynthesis.cancel(); } catch(e) {}
+  if(slowTimer) clearTimeout(slowTimer);
+  slowPlaying = false;
+  setTtsButtons("idle");
+}
+
+function speak(text, rate = 1){
+  if(!("speechSynthesis" in window)){
+    alert("此瀏覽器不支持朗讀。");
+    return;
+  }
+  stopAllTts();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US";
+  u.rate = rate;
+  u.onstart = () => setTtsButtons("playing");
+  u.onend   = () => setTtsButtons("idle");
+  u.onerror = () => setTtsButtons("idle");
+  window.speechSynthesis.speak(u);
+  setTimeout(()=>setTtsButtons("playing"), 120);
+}
+
+// ✅ 慢速：逐句朗讀 + 句間停頓（不依賴 rate 生效）
+function splitSentences(text){
+  return (text || "")
+    .replace(/\r\n/g,"\n")
+    .replace(/\n+/g," ")
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map(s=>s.trim())
+    .filter(Boolean);
+}
+
+function speakSlow(text, rate = 0.9, gapMs = 320){
+  if(!("speechSynthesis" in window)){
+    alert("此瀏覽器不支持朗讀。");
+    return;
+  }
+  stopAllTts();
+
+  slowQueue = splitSentences(text);
+  slowIndex = 0;
+  slowPlaying = true;
+
+  if(!slowQueue.length){
+    slowPlaying = false;
+    setTtsButtons("idle");
+    return;
+  }
+
+  setTtsButtons("playing");
+
+  const speakNext = () => {
+    if(!slowPlaying) return;
+
+    // 如果使用者按了暫停，等一下再檢查（避免 gap 時也往下跑）
+    if(window.speechSynthesis.paused){
+      slowTimer = setTimeout(speakNext, 120);
+      return;
+    }
+
+    if(slowIndex >= slowQueue.length){
+      slowPlaying = false;
+      setTtsButtons("idle");
+      return;
+    }
+
+    const u = new SpeechSynthesisUtterance(slowQueue[slowIndex]);
+    u.lang = "en-US";
+    u.rate = rate; // 有些機型會忽略，但我們有 gap 仍會變慢
+
+    u.onend = () => {
+      slowIndex++;
+      slowTimer = setTimeout(speakNext, gapMs);
+    };
+    u.onerror = () => {
+      slowPlaying = false;
+      setTtsButtons("idle");
+    };
+
+    window.speechSynthesis.speak(u);
+  };
+
+  speakNext();
+}
+
+btnTtsFullNormal.onclick = () => {
+  const full = articles[selector.value].text.replace(/\n/g," ");
+  speak(full, 1);
+};
+btnTtsFullSlow.onclick = () => {
+  const full = articles[selector.value].text;
+  speakSlow(full, 0.9, 330);
+};
+
+btnTtsTargetNormal.onclick = () => {
+  const t = (segments[idx] || "").trim();
+  if(!t) return;
+  speak(t, 1);
+};
+btnTtsTargetSlow.onclick = () => {
+  const t = (segments[idx] || "").trim();
+  if(!t) return;
+  speakSlow(t, 0.9, 280);
+};
+
+btnTtsPause.onclick = () => {
+  try{
+    window.speechSynthesis.pause();
+    setTtsButtons("paused");
+  }catch(e){}
+};
+btnTtsResume.onclick = () => {
+  try{
+    window.speechSynthesis.resume();
+    setTtsButtons("playing");
+  }catch(e){}
+};
+btnTtsStop.onclick = () => {
+  stopAllTts();
+};
+
+/* ========= 功能切換 ========= */
+tabView.onclick = () => {
+  stopAllTts();
+  pageView.style.display = "";
+  pageRec.style.display = "none";
+  tabView.classList.add("primary");
+  tabRec.classList.remove("primary");
+};
+
+tabRec.onclick = () => {
+  stopAllTts();
+  pageView.style.display = "none";
+  pageRec.style.display = "";
+  tabRec.classList.add("primary");
+  tabView.classList.remove("primary");
+  syncAndLoad("view", true);
+};
+
 /* ========= 載入文章（核心） ========= */
 function loadCurrentArticle(){
+  stopAllTts(); // ✅ 換文章就停朗讀
+
   const key = selector.value;
   const a = articles[key];
 
@@ -265,7 +418,7 @@ function loadCurrentArticle(){
   document.getElementById("articleTitle").textContent = a.title;
   lines = splitLines(a.text);
   document.getElementById("articleMeta").textContent = `共 ${lines.length} 句`;
-  document.getElementById("articleBody").textContent = a.text;
+  document.getElementById("articleBody").textContent = a.text.trim();
 
   // 背誦頁標題/句數
   recMetaEl.textContent = `共 ${lines.length} 句`;
@@ -275,7 +428,7 @@ function loadCurrentArticle(){
   buildSegments(modeEl.value);
   renderTarget();
 
-  // ✅ 每次載入文章：讓課文可見（方便準備）
+  // 每次載入文章：讓課文可見（方便準備）
   showTargetArea();
 }
 
@@ -334,108 +487,13 @@ document.getElementById("next").onclick = () => {
   }
 };
 
-/* ========= ✅ 朗讀（含暫停/繼續/停止） ========= */
-let currentUtterance = null;
-
-const btnTtsFullNormal = document.getElementById("ttsFullNormal");
-const btnTtsFullSlow = document.getElementById("ttsFullSlow");
-const btnTtsPause = document.getElementById("ttsPause");
-const btnTtsResume = document.getElementById("ttsResume");
-const btnTtsStop = document.getElementById("ttsStop");
-
-const btnTtsTargetNormal = document.getElementById("ttsTargetNormal");
-const btnTtsTargetSlow = document.getElementById("ttsTargetSlow");
-
-function setTtsButtons(state){
-  if(state === "idle"){
-    btnTtsPause.disabled = true;
-    btnTtsResume.disabled = true;
-    btnTtsStop.disabled = true;
-  }else if(state === "playing"){
-    btnTtsPause.disabled = false;
-    btnTtsResume.disabled = true;
-    btnTtsStop.disabled = false;
-  }else if(state === "paused"){
-    btnTtsPause.disabled = true;
-    btnTtsResume.disabled = false;
-    btnTtsStop.disabled = false;
-  }
-}
-setTtsButtons("idle");
-
-function speak(text, rate = 1){
-  if(!("speechSynthesis" in window)){
-    alert("此瀏覽器不支持朗讀。");
-    return;
-  }
-  window.speechSynthesis.cancel();
-
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = "en-US";
-  u.rate = rate; // ✅ 1 = 正常，0.75/0.8 = 慢速
-  currentUtterance = u;
-
-  u.onstart = () => setTtsButtons("playing");
-  u.onend = () => setTtsButtons("idle");
-  u.onerror = () => setTtsButtons("idle");
-
-  window.speechSynthesis.speak(u);
-  setTimeout(()=>setTtsButtons("playing"), 150);
-}
-
-
-btnTtsFullNormal.onclick = () => {
-  const full = articles[selector.value].text.replace(/\n/g," ");
-  speak(full, 1);
-};
-
-btnTtsFullSlow.onclick = () => {
-  const full = articles[selector.value].text.replace(/\n/g," ");
-  speak(full, 0.75);
-};
-
-
-btnTtsPause.onclick = () => {
-  try{
-    window.speechSynthesis.pause();
-    setTtsButtons("paused");
-  }catch(e){}
-};
-
-btnTtsResume.onclick = () => {
-  try{
-    window.speechSynthesis.resume();
-    setTtsButtons("playing");
-  }catch(e){}
-};
-
-btnTtsStop.onclick = () => {
-  try{ window.speechSynthesis.cancel(); }catch(e){}
-  setTtsButtons("idle");
-};
-
-btnTtsTargetNormal.onclick = () => {
-  const t = (segments[idx] || "").trim();
-  if(!t) return;
-  speak(t, 1);
-};
-
-btnTtsTargetSlow.onclick = () => {
-  const t = (segments[idx] || "").trim();
-  if(!t) return;
-  speak(t, 0.75);
-};
-
-
 /* ========= ✅ 語音識別（防重覆爆字） ========= */
 document.getElementById("startRec").onclick = () => {
-  // ✅ 核心需求：按下開始識別那一刻，課文立刻消失
   hideTargetArea();
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!SR){
     alert("此瀏覽器不支持語音識別。建議 Android Chrome + https。");
-    // 不支援也給他看回來
     showTargetArea();
     return;
   }
@@ -451,7 +509,6 @@ document.getElementById("startRec").onclick = () => {
   recognition.onerror = (e)=>{
     recognizing = false;
     alert("語音識別出錯/被阻止：" + (e.error || "unknown") + "\n\n請檢查：地址欄🔒→ 麥克風 = 允許");
-    // 出錯就顯示回來
     showTargetArea();
   };
 
@@ -466,7 +523,6 @@ document.getElementById("startRec").onclick = () => {
     }
 
     const clean = finalText.replace(/\s+/g," ").trim();
-
     if(clean && clean !== lastFinalChunk){
       finalTranscript = (finalTranscript + " " + clean).replace(/\s+/g," ").trim();
       lastFinalChunk = clean;
@@ -491,13 +547,11 @@ document.getElementById("startRec").onclick = () => {
 
 document.getElementById("stopRec").onclick = () => {
   if(recognition && recognizing) recognition.stop();
-  // 停止後顯示回來（方便對照）
   showTargetArea();
 };
 
 document.getElementById("clear").onclick = () => {
   resetRecInput();
-  // 清空後顯示回來（方便準備）
   showTargetArea();
 };
 
@@ -533,8 +587,6 @@ document.getElementById("check").onclick = () => {
     else html += `<span class="wrong">[${w}→${s}]</span> `;
   }
   diffOutEl.innerHTML = html;
-
-  // 檢查後顯示課文對照
   showTargetArea();
 };
 
@@ -548,7 +600,7 @@ document.getElementById("check").onclick = () => {
 /* ========= 首次載入 ========= */
 window.addEventListener("DOMContentLoaded", () => {
   const keys = Object.keys(articles).sort();
-  selector.value = keys[keys.length - 1]; // 默選最新的一天
+  selector.value = keys[keys.length - 1];
   selectorRec.value = selector.value;
   loadCurrentArticle();
   showTargetArea();
@@ -556,11 +608,3 @@ window.addEventListener("DOMContentLoaded", () => {
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
